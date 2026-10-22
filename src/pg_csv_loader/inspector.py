@@ -14,9 +14,9 @@ console = Console()
 EXCLUDED_SCHEMAS = {"pg_catalog", "information_schema", "pg_toast"}
 
 
-def get_available_tables(engine: Engine) -> list[tuple[str | None, str]]:
+def get_available_tables(engine: Engine, inspector: Any = None) -> list[tuple[str | None, str]]:
     """Fetch non-system schemas and collect all (schema, table_name) pairs."""
-    insp = inspect(engine)
+    insp = inspector or inspect(engine)
     try:
         raw_schemas = insp.get_schema_names()
         schemas = [
@@ -43,8 +43,9 @@ def get_available_tables(engine: Engine) -> list[tuple[str | None, str]]:
 
 def select_table(engine: Engine) -> tuple[str | None, str, list[dict[str, Any]]]:
     """Interactively select a table and retrieve its column metadata."""
+    insp = inspect(engine)
     try:
-        tables = get_available_tables(engine)
+        tables = get_available_tables(engine, inspector=insp)
     except SQLAlchemyError as err:
         console.print(
             Panel(
@@ -100,6 +101,5 @@ def select_table(engine: Engine) -> tuple[str | None, str, list[dict[str, Any]]]
         sys.exit(0)
 
     schema, table_name = selected
-    insp = inspect(engine)
     columns = insp.get_columns(table_name, schema=schema)
     return schema, table_name, columns

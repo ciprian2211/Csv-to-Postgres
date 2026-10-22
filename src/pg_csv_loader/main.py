@@ -1,6 +1,5 @@
 """CLI entry point and interactive flow orchestration for pg-csv-loader."""
 
-import argparse
 import sys
 import time
 from pathlib import Path
@@ -16,14 +15,6 @@ from pg_csv_loader.uploader import upload_csv
 from pg_csv_loader.validator import prompt_and_validate_csv
 
 console = Console()
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="pg-csv-loader",
-        description="Resilient interactive CLI tool to import CSV files into PostgreSQL tables using SQLAlchemy.",
-    )
-    return parser.parse_args()
 
 
 def display_summary(
@@ -51,8 +42,6 @@ def display_summary(
 
 def app() -> None:
     """Main CLI entrypoint."""
-    parse_args()
-
     console.print(
         Panel(
             "[bold cyan]PostgreSQL CSV Loader (pg-csv-loader)[/bold cyan]\n"
