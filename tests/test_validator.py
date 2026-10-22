@@ -96,18 +96,24 @@ def test_prepare_row_null_and_empty_string_handling():
         sa.Column("required_str", sa.String, nullable=False),
         sa.Column("optional_str", sa.String, nullable=True),
         sa.Column("optional_int", sa.Integer, nullable=True),
+        sa.Column("is_active", sa.Boolean, nullable=False),
+        sa.Column("is_admin", sa.Boolean, nullable=True),
     )
     raw_row = {
         "id": "1",
         "required_str": "",
         "optional_str": "",
         "optional_int": "",
+        "is_active": "true",
+        "is_admin": "0",
     }
     cleaned = prepare_row(raw_row, table)
     assert cleaned["id"] == "1"
     assert cleaned["required_str"] == ""  # Non-nullable string preserves empty string
     assert cleaned["optional_str"] is None  # Nullable string becomes None
     assert cleaned["optional_int"] is None  # Non-string empty becomes None
+    assert cleaned["is_active"] is True
+    assert cleaned["is_admin"] is False
 
 
 def test_transactional_rollback_on_invalid_data(tmp_path: Path):

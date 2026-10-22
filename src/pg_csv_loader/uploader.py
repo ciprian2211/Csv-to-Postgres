@@ -41,7 +41,16 @@ def prepare_row(raw_row: dict[str, str | None], target_table: Table) -> dict[str
             else:
                 row[col_name] = None
         else:
-            row[col_name] = val
+            if isinstance(col.type, types.Boolean) and isinstance(val, str):
+                s = val.strip().lower()
+                if s in ("true", "t", "1", "yes", "y"):
+                    row[col_name] = True
+                elif s in ("false", "f", "0", "no", "n"):
+                    row[col_name] = False
+                else:
+                    row[col_name] = val
+            else:
+                row[col_name] = val
     return row
 
 
