@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from pg_csv_loader.discovery import normalize_pg_uri, scan_local_postgres
 from pg_csv_loader.inspector import get_available_tables
 from pg_csv_loader.uploader import prepare_row, upload_csv
-from pg_csv_loader.validator import ValidationError, read_csv_headers, validate_headers
+from pg_csv_loader.validator import ValidationError, normalize_csv_path, read_csv_headers, validate_headers
 
 
 def test_exact_header_match():
@@ -263,6 +263,24 @@ def test_scan_local_postgres_not_found(tmp_path: Path):
         found, host, port = scan_local_postgres()
         assert found is False
         assert host is None
+
+
+def test_normalize_csv_path_strips_quotes(tmp_path: Path):
+    sample = tmp_path / "sample.csv"
+    sample.write_text("a,b\n1,2\n", encoding="utf-8")
+
+    # Test double quotes (standard Windows 'Copy as path')
+    double_quoted = f'"{sample}"'
+    assert normalize_csv_path(double_quoted) == sample.resolve()
+
+    # Test single quotes
+    single_quoted = f"'{sample}'"
+    assert normalize_csv_path(single_quoted) == sample.resolve()
+
+
+def test_normalize_csv_path_expands_user():
+    path = normalize_csv_path("~/test.csv")
+    assert str(path) == str(Path.home() / "test.csv")
 
 
 

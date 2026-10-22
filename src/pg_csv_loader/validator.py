@@ -17,9 +17,15 @@ class ValidationError(Exception):
     pass
 
 
+def normalize_csv_path(raw_path: str | Path) -> Path:
+    """Strip surrounding quotes, expand user directory (~), and resolve absolute path."""
+    cleaned = str(raw_path).strip().strip("\"'")
+    return Path(cleaned).expanduser().resolve()
+
+
 def read_csv_headers(file_path: str | Path) -> list[str]:
     """Read and normalize CSV headers from a file using utf-8-sig encoding."""
-    path = Path(file_path)
+    path = normalize_csv_path(file_path)
     if not path.is_file():
         raise ValidationError(f"CSV file not found: '{file_path}'")
     if path.stat().st_size == 0:
@@ -101,7 +107,7 @@ def prompt_and_validate_csv(db_columns: list[dict[str, Any]]) -> tuple[Path, lis
             console.print("[yellow]Aborted by user.[/yellow]")
             sys.exit(0)
 
-        path = Path(raw_path).expanduser().resolve()
+        path = normalize_csv_path(raw_path)
         try:
             headers = read_csv_headers(path)
             validate_headers(headers, db_columns)
