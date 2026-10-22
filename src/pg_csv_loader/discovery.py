@@ -14,6 +14,26 @@ from sqlalchemy.exc import SQLAlchemyError
 console = Console()
 
 
+def get_default_username() -> str:
+    """Resolve default username checking PGUSER, USER (Unix), and USERNAME (Windows)."""
+    return (
+        os.environ.get("PGUSER")
+        or os.environ.get("USER")
+        or os.environ.get("USERNAME")
+        or "postgres"
+    )
+
+
+def _get_unix_socket_dirs() -> list[str | Path]:
+    """Return platform-specific Unix domain socket search paths."""
+    if sys.platform == "win32":
+        return []
+    if sys.platform == "darwin":
+        return ["/tmp", "/opt/homebrew/var/postgresql", "/usr/local/var/postgres", "/var/run/postgresql"]
+    # Linux, FreeBSD, OpenBSD, and others
+    return ["/var/run/postgresql", "/run/postgresql", "/tmp", "/var/tmp"]
+
+
 def scan_local_postgres() -> tuple[bool, str | None, int]:
     """Check if 127.0.0.1:5432 or local Unix domain sockets are accepting connections.
 
@@ -27,14 +47,14 @@ def scan_local_postgres() -> tuple[bool, str | None, int]:
         pass
 
     # 2. Check Unix domain socket locations
-    for sock_dir in ("/var/run/postgresql", "/tmp"):
+    for sock_dir in _get_unix_socket_dirs():
         p = Path(sock_dir)
         if p.exists() and p.is_dir():
             for sock in sorted(p.glob(".s.PGSQL.*")):
                 if sock.is_socket():
                     port_str = sock.name.rsplit(".", 1)[-1]
                     port = int(port_str) if port_str.isdigit() else 5432
-                    return True, sock_dir, port
+                    return True, str(sock_dir), port
 
     return False, None, 5432
 
@@ -75,7 +95,7 @@ def _connect_manual() -> Engine | None:
 
 
 def _connect_local(host: str, port: int = 5432, initial_db: str | None = None) -> Engine | None:
-    current_user = os.environ.get("PGUSER") or "postgres"
+    current_user = get_default_username()
     current_pwd = os.environ.get("PGPASSWORD")
     if not initial_db:
         initial_db = os.environ.get("PGDATABASE") or "postgres"

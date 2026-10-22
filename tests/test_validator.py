@@ -6,7 +6,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from pg_csv_loader.discovery import normalize_pg_uri, scan_local_postgres
+from pg_csv_loader.discovery import get_default_username, normalize_pg_uri, scan_local_postgres
 from pg_csv_loader.inspector import get_available_tables
 from pg_csv_loader.uploader import prepare_row, upload_csv
 from pg_csv_loader.validator import ValidationError, normalize_csv_path, read_csv_headers, validate_headers
@@ -281,6 +281,42 @@ def test_normalize_csv_path_strips_quotes(tmp_path: Path):
 def test_normalize_csv_path_expands_user():
     path = normalize_csv_path("~/test.csv")
     assert str(path) == str(Path.home() / "test.csv")
+
+
+def test_get_default_username_prefers_pguser(monkeypatch):
+    monkeypatch.setenv("PGUSER", "db_admin")
+    monkeypatch.setenv("USER", "unix_user")
+    monkeypatch.setenv("USERNAME", "win_user")
+    assert get_default_username() == "db_admin"
+
+
+def test_get_default_username_windows_fallback(monkeypatch):
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.setenv("USERNAME", "win_user")
+    assert get_default_username() == "win_user"
+
+
+def test_scan_local_postgres_windows_skips_sockets():
+    with patch("sys.platform", "win32"), \
+         patch("socket.create_connection", side_effect=OSError):
+        found, host, port = scan_local_postgres()
+        assert found is False
+        assert host is None
+
+
+def test_scan_local_postgres_macos_socket_locations(tmp_path: Path):
+    mock_brew_sock = tmp_path / ".s.PGSQL.5432"
+    mock_brew_sock.touch()
+    with patch("sys.platform", "darwin"), \
+         patch("socket.create_connection", side_effect=OSError), \
+         patch("pg_csv_loader.discovery._get_unix_socket_dirs", return_value=[tmp_path]):
+        with patch.object(Path, "is_socket", return_value=True):
+            found, host, port = scan_local_postgres()
+            assert found is True
+            assert host == str(tmp_path)
+            assert port == 5432
+
 
 
 
