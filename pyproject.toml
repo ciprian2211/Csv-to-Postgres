@@ -1,0 +1,27 @@
+[project]
+name = "pg-csv-loader"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "ciprian2211", email = "ciprian.iliuta05@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "psycopg[binary]>=3.3.6",
+    "questionary>=2.1.1",
+    "rich>=15.0.0",
+    "sqlalchemy>=2.0",
+]
+
+[project.scripts]
+pg-csv-loader = "pg_csv_loader.main:app"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
