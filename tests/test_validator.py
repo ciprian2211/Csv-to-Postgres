@@ -1,5 +1,6 @@
 """Unit tests for CSV validation, header matching, and transactional rollback."""
 
+import csv
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
@@ -8,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from pg_csv_loader.discovery import get_default_username, normalize_pg_uri, scan_local_postgres
 from pg_csv_loader.inspector import get_available_tables
-from pg_csv_loader.uploader import prepare_row, upload_csv
+from pg_csv_loader.uploader import configure_safe_csv_field_limit, prepare_row, upload_csv
 from pg_csv_loader.validator import ValidationError, normalize_csv_path, read_csv_headers, validate_headers
 
 
@@ -316,6 +317,24 @@ def test_scan_local_postgres_macos_socket_locations(tmp_path: Path):
             assert found is True
             assert host == str(tmp_path)
             assert port == 5432
+
+
+def test_configure_safe_csv_field_limit_handles_overflow(monkeypatch):
+    calls = []
+    original_limit = csv.field_size_limit
+
+    def mock_limit(new_limit=None):
+        if new_limit is not None:
+            calls.append(new_limit)
+            if new_limit > 2**31 - 1:
+                raise OverflowError("Python int too large to convert to C long")
+        return original_limit()
+
+    monkeypatch.setattr(csv, "field_size_limit", mock_limit)
+    limit = configure_safe_csv_field_limit()
+    assert limit <= 2**31 - 1
+    assert len(calls) >= 2
+
 
 
 

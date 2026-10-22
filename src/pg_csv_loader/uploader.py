@@ -22,6 +22,20 @@ from sqlalchemy.exc import SQLAlchemyError
 console = Console()
 
 
+def configure_safe_csv_field_limit() -> int:
+    """Safely increase csv.field_size_limit stepping down on Windows/32-bit C long overflow."""
+    limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(limit)
+            return limit
+        except OverflowError:
+            limit = int(limit / 10)
+
+
+configure_safe_csv_field_limit()
+
+
 def prepare_row(raw_row: dict[str, str | None], target_table: Table) -> dict[str, Any]:
     """Clean CSV row values: convert empty strings to None based on column type & nullability."""
     # shortcut: relies on DB driver type coercion for non-empty string values, upgrade to explicit parser if needed
