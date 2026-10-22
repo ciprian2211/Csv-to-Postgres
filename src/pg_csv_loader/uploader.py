@@ -34,23 +34,24 @@ def prepare_row(raw_row: dict[str, str | None], target_table: Table) -> dict[str
             continue
 
         col = target_table.columns[col_name]
-        if val is None or val == "":
-            is_string = isinstance(col.type, (types.String, types.Text))
+        is_string = isinstance(col.type, (types.String, types.Text))
+        val_clean = val if is_string else (val.strip() if isinstance(val, str) else val)
+
+        if val_clean is None or val_clean == "":
             if not col.nullable and is_string and val == "":
                 row[col_name] = ""
             else:
                 row[col_name] = None
-        else:
-            if isinstance(col.type, types.Boolean) and isinstance(val, str):
-                s = val.strip().lower()
-                if s in ("true", "t", "1", "yes", "y"):
-                    row[col_name] = True
-                elif s in ("false", "f", "0", "no", "n"):
-                    row[col_name] = False
-                else:
-                    row[col_name] = val
+        elif isinstance(col.type, types.Boolean) and isinstance(val_clean, str):
+            s = val_clean.lower()
+            if s in ("true", "t", "1", "yes", "y"):
+                row[col_name] = True
+            elif s in ("false", "f", "0", "no", "n"):
+                row[col_name] = False
             else:
-                row[col_name] = val
+                row[col_name] = val_clean
+        else:
+            row[col_name] = val_clean
     return row
 
 
@@ -103,10 +104,10 @@ def upload_csv(
                         total_inserted += len(batch)
                         progress.update(task, completed=total_inserted)
 
-    except SQLAlchemyError as err:
+    except (SQLAlchemyError, UnicodeDecodeError, csv.Error) as err:
         console.print(
             Panel(
-                f"[bold red]Database Error during batch insert:[/bold red]\n{err}",
+                f"[bold red]Import error during batch insert:[/bold red]\n{err}",
                 title="Import Failed - Transaction Rolled Back",
                 border_style="red",
             )

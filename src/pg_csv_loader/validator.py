@@ -25,12 +25,15 @@ def read_csv_headers(file_path: str | Path) -> list[str]:
     if path.stat().st_size == 0:
         raise ValidationError(f"CSV file is empty: '{file_path}'")
 
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.reader(f)
-        try:
-            raw_headers = next(reader)
-        except StopIteration:
-            raise ValidationError(f"CSV file contains no rows: '{file_path}'")
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.reader(f)
+            try:
+                raw_headers = next(reader)
+            except StopIteration:
+                raise ValidationError(f"CSV file contains no rows: '{file_path}'")
+    except (UnicodeDecodeError, csv.Error) as err:
+        raise ValidationError(f"Cannot read CSV file '{file_path}': {err}")
 
     headers = [h.strip() for h in raw_headers]
 
