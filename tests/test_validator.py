@@ -1,15 +1,21 @@
 """Unit tests for CSV validation, header matching, and transactional rollback."""
 
+import csv
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from pg_csv_loader.discovery import normalize_pg_uri, scan_local_postgres
+from pg_csv_loader.discovery import (
+    _get_unix_socket_dirs,
+    get_default_username,
+    normalize_pg_uri,
+    scan_local_postgres,
+)
 from pg_csv_loader.inspector import get_available_tables
-from pg_csv_loader.uploader import prepare_row, upload_csv
-from pg_csv_loader.validator import ValidationError, read_csv_headers, validate_headers
+from pg_csv_loader.uploader import configure_safe_csv_field_limit, prepare_row, upload_csv
+from pg_csv_loader.validator import ValidationError, normalize_csv_path, read_csv_headers, validate_headers
 
 
 def test_exact_header_match():
@@ -263,6 +269,123 @@ def test_scan_local_postgres_not_found(tmp_path: Path):
         found, host, port = scan_local_postgres()
         assert found is False
         assert host is None
+
+
+def test_normalize_csv_path_strips_quotes(tmp_path: Path):
+    sample = tmp_path / "sample.csv"
+    sample.write_text("a,b\n1,2\n", encoding="utf-8")
+
+    # Test double quotes (standard Windows 'Copy as path')
+    double_quoted = f'"{sample}"'
+    assert normalize_csv_path(double_quoted) == sample.resolve()
+
+    # Test single quotes
+    single_quoted = f"'{sample}'"
+    assert normalize_csv_path(single_quoted) == sample.resolve()
+
+
+def test_normalize_csv_path_expands_user():
+    path = normalize_csv_path("~/test.csv")
+    assert str(path) == str(Path.home() / "test.csv")
+
+
+def test_get_default_username_prefers_pguser(monkeypatch):
+    monkeypatch.setenv("PGUSER", "db_admin")
+    monkeypatch.setenv("USER", "unix_user")
+    monkeypatch.setenv("USERNAME", "win_user")
+    assert get_default_username() == "db_admin"
+
+
+def test_get_default_username_windows_fallback(monkeypatch):
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.setenv("USERNAME", "win_user")
+    assert get_default_username() == "win_user"
+
+
+def test_scan_local_postgres_windows_skips_sockets():
+    with patch("sys.platform", "win32"), \
+         patch("socket.create_connection", side_effect=OSError):
+        found, host, port = scan_local_postgres()
+        assert found is False
+        assert host is None
+
+
+def test_scan_local_postgres_macos_socket_locations(tmp_path: Path):
+    mock_brew_sock = tmp_path / ".s.PGSQL.5432"
+    mock_brew_sock.touch()
+    with patch("sys.platform", "darwin"), \
+         patch("socket.create_connection", side_effect=OSError), \
+         patch("pg_csv_loader.discovery._get_unix_socket_dirs", return_value=[tmp_path]):
+        with patch.object(Path, "is_socket", return_value=True):
+            found, host, port = scan_local_postgres()
+            assert found is True
+            assert host == str(tmp_path)
+            assert port == 5432
+
+
+def test_configure_safe_csv_field_limit_handles_overflow(monkeypatch):
+    calls = []
+    original_limit = csv.field_size_limit
+
+    def mock_limit(new_limit=None):
+        if new_limit is not None:
+            calls.append(new_limit)
+            if new_limit > 2**31 - 1:
+                raise OverflowError("Python int too large to convert to C long")
+        return original_limit()
+
+    monkeypatch.setattr(csv, "field_size_limit", mock_limit)
+    limit = configure_safe_csv_field_limit()
+    assert limit <= 2**31 - 1
+    assert len(calls) >= 2
+
+
+def test_scan_local_postgres_localhost_fallback():
+    def mock_create_connection(target, timeout=0.5):
+        host, port = target
+        if host == "127.0.0.1":
+            raise OSError("IPv4 127.0.0.1 unreachable")
+        if host == "localhost":
+            return MagicMock()
+        raise OSError("unknown host")
+
+    with patch("socket.create_connection", side_effect=mock_create_connection), \
+         patch("pg_csv_loader.discovery._get_unix_socket_dirs", return_value=[]):
+        found, host, port = scan_local_postgres()
+        assert found is True
+        assert host == "localhost"
+        assert port == 5432
+
+
+def test_upload_csv_handles_quoted_path(tmp_path: Path):
+    db_file = tmp_path / "quoted.db"
+    engine = sa.create_engine(f"sqlite:///{db_file}")
+    meta = sa.MetaData()
+    table = sa.Table("items", meta, sa.Column("id", sa.Integer, primary_key=True), sa.Column("name", sa.String))
+    meta.create_all(engine)
+
+    csv_file = tmp_path / "items.csv"
+    csv_file.write_text("id,name\n1,one\n", encoding="utf-8")
+    quoted_path = f'"{csv_file}"'
+
+    rows, _ = upload_csv(engine, None, "items", quoted_path)
+    assert rows == 1
+
+
+def test_get_unix_socket_dirs_by_platform():
+    with patch("sys.platform", "darwin"):
+        dirs = _get_unix_socket_dirs()
+        assert "/opt/homebrew/var/postgresql" in dirs
+        assert "/tmp" in dirs
+    with patch("sys.platform", "win32"):
+        assert _get_unix_socket_dirs() == []
+    with patch("sys.platform", "linux"):
+        dirs = _get_unix_socket_dirs()
+        assert "/var/run/postgresql" in dirs
+
+
+
 
 
 
