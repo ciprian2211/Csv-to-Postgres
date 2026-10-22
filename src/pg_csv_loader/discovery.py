@@ -74,10 +74,11 @@ def _connect_manual() -> Engine | None:
                 return None
 
 
-def _connect_local(host: str, port: int = 5432) -> Engine | None:
+def _connect_local(host: str, port: int = 5432, initial_db: str | None = None) -> Engine | None:
     current_user = os.environ.get("PGUSER") or "postgres"
     current_pwd = os.environ.get("PGPASSWORD")
-    initial_db = os.environ.get("PGDATABASE") or "postgres"
+    if not initial_db:
+        initial_db = os.environ.get("PGDATABASE") or "postgres"
 
     # Prompt upfront for credentials (crucial for Docker/custom Postgres setups)
     username = questionary.text("PostgreSQL username:", default=current_user).ask()
@@ -132,7 +133,12 @@ def _connect_local(host: str, port: int = 5432) -> Engine | None:
     try:
         with init_engine.connect() as conn:
             res = conn.execute(
-                text("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;")
+                text(
+                    "SELECT datname FROM pg_database "
+                    "WHERE datistemplate = false AND datallowconn = true "
+                    "AND has_database_privilege(current_user, datname, 'CONNECT') "
+                    "ORDER BY datname;"
+                )
             )
             databases = [r[0] for r in res.fetchall()]
     except Exception:
@@ -159,6 +165,20 @@ def _connect_local(host: str, port: int = 5432) -> Engine | None:
     final_url = init_engine.url.set(database=target_db)
     init_engine.dispose()
     final_engine = create_engine(final_url)
+    try:
+        with final_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except SQLAlchemyError as err:
+        console.print(
+            Panel(
+                f"[bold red]Cannot connect to target database '{target_db}':[/bold red]\n{err}",
+                title="Target Database Connection Error",
+                border_style="red",
+            )
+        )
+        final_engine.dispose()
+        return None
+
     console.print(
         Panel(
             f"[bold green]Connected successfully![/bold green]\n"
@@ -180,7 +200,11 @@ def _connect_params() -> Engine | None:
     if port_str is None:
         return None
     port = int(port_str.strip()) if port_str.strip().isdigit() else 5432
-    return _connect_local(host=host.strip(), port=port)
+    db_default = os.environ.get("PGDATABASE") or "postgres"
+    db = questionary.text("Database name:", default=db_default).ask()
+    if db is None:
+        return None
+    return _connect_local(host=host.strip(), port=port, initial_db=db.strip() or "postgres")
 
 
 def get_engine() -> Engine:
