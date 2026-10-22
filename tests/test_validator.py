@@ -1,11 +1,12 @@
 """Unit tests for CSV validation, header matching, and transactional rollback."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from pg_csv_loader.discovery import normalize_pg_uri
+from pg_csv_loader.discovery import normalize_pg_uri, scan_local_postgres
 from pg_csv_loader.inspector import get_available_tables
 from pg_csv_loader.uploader import prepare_row, upload_csv
 from pg_csv_loader.validator import ValidationError, read_csv_headers, validate_headers
@@ -210,7 +211,58 @@ def test_get_available_tables():
     sa.Table("audit_items", meta, sa.Column("id", sa.Integer, primary_key=True))
     meta.create_all(engine)
 
-    tables = get_available_tables(engine)
+    insp = sa.inspect(engine)
+    tables = get_available_tables(engine, inspector=insp)
     assert any(tbl == "audit_items" for _, tbl in tables)
+
+
+def test_prepare_row_whitespace_cleaning():
+    meta = sa.MetaData()
+    table = sa.Table(
+        "items",
+        meta,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("name", sa.String, nullable=False),
+        sa.Column("description", sa.String, nullable=True),
+        sa.Column("amount", sa.Numeric, nullable=True),
+        sa.Column("is_active", sa.Boolean, nullable=True),
+    )
+    raw_row = {
+        "id": " 42 ",
+        "name": "Widget",
+        "description": "   ",  # Nullable string with spaces -> None
+        "amount": "   ",       # Numeric with spaces -> None
+        "is_active": "   ",    # Boolean with spaces -> None
+    }
+    cleaned = prepare_row(raw_row, table)
+    assert cleaned["id"] == "42"
+    assert cleaned["name"] == "Widget"
+    assert cleaned["amount"] is None
+    assert cleaned["is_active"] is None
+
+
+def test_read_csv_invalid_encoding(tmp_path: Path):
+    bad_encoding_file = tmp_path / "bad.csv"
+    # Write invalid UTF-8 bytes
+    bad_encoding_file.write_bytes(b"\xff\xfe\x00\x00invalid")
+    with pytest.raises(ValidationError, match="Cannot read CSV file"):
+        read_csv_headers(bad_encoding_file)
+
+
+def test_scan_local_postgres_tcp_detected():
+    with patch("socket.create_connection", return_value=MagicMock()):
+        found, host, port = scan_local_postgres()
+        assert found is True
+        assert host == "127.0.0.1"
+        assert port == 5432
+
+
+def test_scan_local_postgres_not_found(tmp_path: Path):
+    with patch("socket.create_connection", side_effect=OSError), \
+         patch("pg_csv_loader.discovery.Path.exists", return_value=False):
+        found, host, port = scan_local_postgres()
+        assert found is False
+        assert host is None
+
 
 
