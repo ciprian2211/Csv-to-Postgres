@@ -7,7 +7,12 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from pg_csv_loader.discovery import get_default_username, normalize_pg_uri, scan_local_postgres
+from pg_csv_loader.discovery import (
+    _get_unix_socket_dirs,
+    get_default_username,
+    normalize_pg_uri,
+    scan_local_postgres,
+)
 from pg_csv_loader.inspector import get_available_tables
 from pg_csv_loader.uploader import configure_safe_csv_field_limit, prepare_row, upload_csv
 from pg_csv_loader.validator import ValidationError, normalize_csv_path, read_csv_headers, validate_headers
@@ -334,6 +339,51 @@ def test_configure_safe_csv_field_limit_handles_overflow(monkeypatch):
     limit = configure_safe_csv_field_limit()
     assert limit <= 2**31 - 1
     assert len(calls) >= 2
+
+
+def test_scan_local_postgres_localhost_fallback():
+    def mock_create_connection(target, timeout=0.5):
+        host, port = target
+        if host == "127.0.0.1":
+            raise OSError("IPv4 127.0.0.1 unreachable")
+        if host == "localhost":
+            return MagicMock()
+        raise OSError("unknown host")
+
+    with patch("socket.create_connection", side_effect=mock_create_connection), \
+         patch("pg_csv_loader.discovery._get_unix_socket_dirs", return_value=[]):
+        found, host, port = scan_local_postgres()
+        assert found is True
+        assert host == "localhost"
+        assert port == 5432
+
+
+def test_upload_csv_handles_quoted_path(tmp_path: Path):
+    db_file = tmp_path / "quoted.db"
+    engine = sa.create_engine(f"sqlite:///{db_file}")
+    meta = sa.MetaData()
+    table = sa.Table("items", meta, sa.Column("id", sa.Integer, primary_key=True), sa.Column("name", sa.String))
+    meta.create_all(engine)
+
+    csv_file = tmp_path / "items.csv"
+    csv_file.write_text("id,name\n1,one\n", encoding="utf-8")
+    quoted_path = f'"{csv_file}"'
+
+    rows, _ = upload_csv(engine, None, "items", quoted_path)
+    assert rows == 1
+
+
+def test_get_unix_socket_dirs_by_platform():
+    with patch("sys.platform", "darwin"):
+        dirs = _get_unix_socket_dirs()
+        assert "/opt/homebrew/var/postgresql" in dirs
+        assert "/tmp" in dirs
+    with patch("sys.platform", "win32"):
+        assert _get_unix_socket_dirs() == []
+    with patch("sys.platform", "linux"):
+        dirs = _get_unix_socket_dirs()
+        assert "/var/run/postgresql" in dirs
+
 
 
 

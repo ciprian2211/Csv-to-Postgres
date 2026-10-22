@@ -39,12 +39,13 @@ def scan_local_postgres() -> tuple[bool, str | None, int]:
 
     Safe mode: no port scanning, no credential brute-forcing.
     """
-    # 1. Check TCP 127.0.0.1:5432
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=0.5):
-            return True, "127.0.0.1", 5432
-    except OSError:
-        pass
+    # 1. Check TCP 127.0.0.1:5432 and localhost:5432
+    for host in ("127.0.0.1", "localhost"):
+        try:
+            with socket.create_connection((host, 5432), timeout=0.5):
+                return True, host, 5432
+        except OSError:
+            pass
 
     # 2. Check Unix domain socket locations
     for sock_dir in _get_unix_socket_dirs():

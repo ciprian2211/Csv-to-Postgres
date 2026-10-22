@@ -19,6 +19,8 @@ from rich.progress import (
 from sqlalchemy import Engine, MetaData, Table, insert, types
 from sqlalchemy.exc import SQLAlchemyError
 
+from pg_csv_loader.validator import normalize_csv_path
+
 console = Console()
 
 
@@ -81,7 +83,7 @@ def upload_csv(
     metadata = MetaData()
     target_table = Table(table_name, metadata, schema=schema, autoload_with=engine)
 
-    path = Path(csv_path)
+    path = normalize_csv_path(csv_path)
     # Estimate total rows for progress bar (excluding header)
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
         total_rows = max(0, sum(1 for _ in f) - 1)
